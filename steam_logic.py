@@ -102,8 +102,6 @@ class SteamReviewsDownloader:
                         helpful = r.get('votes_up', 0)
                         funny = r.get('votes_funny', 0)
                         
-                        # Проверяем, есть ли информация об играх
-                        # Если num_games_owned = 0, но автор написал много отзывов - вероятно, профиль скрыт
                         games_owned = r['author'].get('num_games_owned', 0)
                         reviews_posted = r['author'].get('num_reviews', 0)
                         
@@ -124,7 +122,7 @@ class SteamReviewsDownloader:
                             'Кол-во игр': games_owned,
                             'Кол-во отзывов': reviews_posted,
                             'Часов наиграно': round(hours_played, 2),
-                            'Скрытый профиль': is_private,  # 👈 ДОБАВЛЕНО
+                            'Скрытый профиль': is_private,
                         })
                         
                         total_downloaded += 1
@@ -147,6 +145,12 @@ class SteamReviewsDownloader:
         
         stats = df_copy.groupby(['Группа', 'Тип отзыва']).size().unstack(fill_value=0)
         
+        # Проверяем, есть ли столбцы 'Положительный' и 'Отрицательный'
+        if 'Положительный' not in stats.columns:
+            stats['Положительный'] = 0
+        if 'Отрицательный' not in stats.columns:
+            stats['Отрицательный'] = 0
+        
         stats = stats.rename(columns={
             'Положительный': 'Положительные',
             'Отрицательный': 'Отрицательные'
@@ -154,9 +158,11 @@ class SteamReviewsDownloader:
         
         stats['Кол-во отзывов'] = stats['Положительные'] + stats['Отрицательные']
         total_reviews = stats['Кол-во отзывов'].sum()
-        stats['% от общего числа'] = (stats['Кол-во отзывов'] / total_reviews * 100).round(2)
-        stats['% положительных от группы'] = (stats['Положительные'] / stats['Кол-во отзывов'] * 100).round(2)
-        stats['% отрицательных от группы'] = (stats['Отрицательные'] / stats['Кол-во отзывов'] * 100).round(2)
+        
+        # Защита от деления на ноль
+        stats['% от общего числа'] = (stats['Кол-во отзывов'] / total_reviews * 100).round(2) if total_reviews > 0 else 0
+        stats['% положительных от группы'] = (stats['Положительные'] / stats['Кол-во отзывов'] * 100).round(2) if stats['Кол-во отзывов'].sum() > 0 else 0
+        stats['% отрицательных от группы'] = (stats['Отрицательные'] / stats['Кол-во отзывов'] * 100).round(2) if stats['Кол-во отзывов'].sum() > 0 else 0
         
         stats = stats.reset_index()
         stats = stats.rename(columns={'Группа': group_name})
@@ -229,7 +235,7 @@ class SteamReviewsDownloader:
         return self._calculate_group_stats(df, 'Кол-во игр автора', 'Кол-во игр автора')
     
     def save_to_excel(self, reviews, appid, game_name=None):
-        """Сохраняет отзывы и статистику в Excel (6 листов)"""
+        """Сохраняет отзывы и статистику в Excel (5 листов)"""
         df = pd.DataFrame(reviews)
         
         # Делаем гиперссылки
@@ -237,7 +243,8 @@ class SteamReviewsDownloader:
             return f'=HYPERLINK("{row["Ссылка на отзыв"]}", "{row["Автор"]}")'
         df['Ссылка на отзыв'] = df.apply(make_hyperlink, axis=1)
         df.drop(columns=['Автор'], inplace=True)
-
+        
+        # Удаляем служебный столбец
         if 'Скрытый профиль' in df.columns:
             df.drop(columns=['Скрытый профиль'], inplace=True)
         
