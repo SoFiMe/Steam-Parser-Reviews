@@ -10,11 +10,28 @@ class SteamReviewsDownloader:
         self.reviews = []
         self.total_reviews = 0
         self.available_reviews = None
-        self.progress_callback = None  # Функция для обновления прогресса
-        
+        self.progress_callback = None
+        self.game_name = None
+    
     def set_progress_callback(self, callback):
         """Устанавливает функцию для обновления прогресса"""
         self.progress_callback = callback
+    
+    async def fetch_game_name(self, appid):
+        """Получает название игры по AppID"""
+        url = f"https://store.steampowered.com/api/appdetails?appids={appid}&l=russian"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                
+                if str(appid) in data and data[str(appid)]['success']:
+                    name = data[str(appid)]['data']['name']
+                    self.game_name = name
+                    return name
+                return None
     
     async def fetch_total_reviews(self, appid):
         """Получает общее количество отзывов у игры"""
@@ -115,17 +132,15 @@ class SteamReviewsDownloader:
         
         return reviews
     
-    def save_to_excel(self, reviews, appid):
+    def save_to_excel(self, reviews, appid, game_name=None):
         """Сохраняет отзывы и статистику в Excel"""
         df = pd.DataFrame(reviews)
         
-        # Делаем гиперссылки
         def make_hyperlink(row):
             return f'=HYPERLINK("{row["Ссылка на отзыв"]}", "{row["Автор"]}")'
         df['Ссылка на отзыв'] = df.apply(make_hyperlink, axis=1)
         df.drop(columns=['Автор'], inplace=True)
         
-        # Второй лист: статистика по языкам
         total_reviews = len(reviews)
         lang_stats = df.groupby('Язык').agg(
             кол_во_отзывов=('Язык', 'size'),
@@ -140,13 +155,21 @@ class SteamReviewsDownloader:
         lang_stats.columns = ['Язык', 'Кол-во отзывов', 'Положительные', 'Отрицательные', 
                               '% от общего числа', '% положительных от языка', '% отрицательных от языка']
         
-        # Сохраняем
-        filename = f"{appid}_reviews.xlsx"
+        # Формируем имя файла
+        if game_name:
+            invalid_chars = r'<>:"/\|?*'
+            for char in invalid_chars:
+                game_name = game_name.replace(char, '')
+            if len(game_name) > 200:
+                game_name = game_name[:200]
+            filename = f"{game_name}.xlsx"
+        else:
+            filename = f"{appid}_reviews.xlsx"
+        
         with pd.ExcelWriter(filename, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Отзывы', index=False)
             lang_stats.to_excel(writer, sheet_name='Статистика по языкам', index=False)
         
-        # Авто-подгонка ширины колонок
         try:
             from openpyxl import load_workbook
             wb = load_workbook(filename)

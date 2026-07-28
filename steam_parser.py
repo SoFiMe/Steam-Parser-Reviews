@@ -5,21 +5,30 @@ import threading
 import re
 from steam_logic import SteamReviewsDownloader
 
+
 class SteamReviewsApp:
     def __init__(self, root):
         self.root = root
+        self.downloader = SteamReviewsDownloader()
+        self.available_reviews = None
+        self.current_entry = None
+        self.game_name = None  # 👈 Добавляем поле для названия игры
+        
+        self._setup_window(root)
+        self._setup_styles()
+        self._create_widgets()
+        self._setup_bindings()
+    
+    def _setup_window(self, root):
+        """Настройка окна"""
         root.title("Steam Reviews Downloader")
         root.geometry("590x360")
         root.resizable(False, False)
         root.configure(bg="#1e1e2f")
-        
-        # Создаем объект логики
-        self.downloader = SteamReviewsDownloader()
-        self.total_reviews = 0
-        self.available_reviews = None
-        
-        # Стили
-        style = ttk.Style(root)
+    
+    def _setup_styles(self):
+        """Настройка стилей"""
+        style = ttk.Style(self.root)
         style.theme_use('clam')
         
         style.configure("TLabel",
@@ -38,50 +47,90 @@ class SteamReviewsApp:
                         foreground="#f0f0f0",
                         font=("Segoe UI", 11),
                         padding=5)
-        
+    
+    def _create_widgets(self):
+        """Создание всех виджетов"""
         pad_opts = {'padx': 15, 'pady': 10}
         
         # Заголовок
-        title_lbl = ttk.Label(root, text="Загрузчик отзывов Steam", 
-                             font=("Segoe UI", 18, "bold"), 
-                             foreground="#f2e9e4", background="#1e1e2f")
-        title_lbl.pack(pady=(15,5))
+        ttk.Label(
+            self.root,
+            text="Загрузчик отзывов Steam",
+            font=("Segoe UI", 18, "bold"),
+            foreground="#f2e9e4",
+            background="#1e1e2f"
+        ).pack(pady=(15, 5))
         
-        # AppID с подсказкой
-        input_frame = ttk.Frame(root)
+        # --- Строка AppID ---
+        input_frame = ttk.Frame(self.root)
         input_frame.pack(pady=(10, 0), fill="x", padx=15)
         
-        ttk.Label(input_frame, text="AppID или ссылка:").grid(row=0, column=0, sticky="w", **pad_opts)
-        
-        # Поле ввода
-        self.appid_entry = tk.Entry(
-            input_frame, 
-            width=30,
-            bg="#2a2a40",
-            fg="#f0f0f0",
-            font=("Segoe UI", 11),
-            insertbackground="white",
-            relief="flat"
+        ttk.Label(input_frame, text="AppID или ссылка:").grid(
+            row=0, column=0, sticky="w", **pad_opts
         )
+        
+        self.appid_entry = self._create_entry(input_frame)
         self.appid_entry.grid(row=0, column=1, sticky="w", padx=(0, 5))
         
-        # 👇 КНОПКА "Проверить" - сразу после поля
-        self.check_button = ttk.Button(input_frame, text="Проверить", command=self.check_reviews_count)
+        self.check_button = ttk.Button(
+            input_frame,
+            text="Проверить",
+            command=self.check_reviews_count
+        )
         self.check_button.grid(row=0, column=2, padx=10)
         
-        self.available_label = ttk.Label(root, text="Всего отзывов: не проверено", 
-                                        font=("Segoe UI", 10), 
-                                        foreground="#a7a9be", background="#1e1e2f")
+        # Информация о количестве отзывов
+        self.available_label = ttk.Label(
+            self.root,
+            text="Всего отзывов: не проверено",
+            font=("Segoe UI", 10),
+            foreground="#a7a9be",
+            background="#1e1e2f"
+        )
         self.available_label.pack(anchor="w", padx=25, pady=(3, 10))
         
-        # Количество отзывов
-        count_frame = ttk.Frame(root)
+        # --- Строка количества отзывов ---
+        count_frame = ttk.Frame(self.root)
         count_frame.pack(fill="x", padx=15)
         
-        ttk.Label(count_frame, text="Количество выводимых отзывов:").grid(row=0, column=0, sticky="w", **pad_opts)
+        ttk.Label(count_frame, text="Количество выводимых отзывов:").grid(
+            row=0, column=0, sticky="w", **pad_opts
+        )
         
-        self.num_entry = tk.Entry(
-            count_frame, 
+        self.num_entry = self._create_entry(count_frame)
+        self.num_entry.grid(row=0, column=1, sticky="w")
+        
+        # --- Прогресс-бар ---
+        self.progress_var = tk.IntVar()
+        ttk.Progressbar(
+            self.root,
+            maximum=100,
+            variable=self.progress_var,
+            length=500
+        ).pack(pady=(20, 10))
+        
+        # --- Статус ---
+        self.status_label = ttk.Label(
+            self.root,
+            text="Готов к запуску",
+            font=("Segoe UI", 10),
+            foreground="#a7a9be",
+            background="#1e1e2f"
+        )
+        self.status_label.pack()
+        
+        # --- Кнопка запуска ---
+        self.start_button = ttk.Button(
+            self.root,
+            text="Начать загрузку",
+            command=self.start_download
+        )
+        self.start_button.pack(pady=20, ipadx=10, ipady=5)
+    
+    def _create_entry(self, parent):
+        """Создает стилизованное поле ввода"""
+        return tk.Entry(
+            parent,
             width=30,
             bg="#2a2a40",
             fg="#f0f0f0",
@@ -89,52 +138,31 @@ class SteamReviewsApp:
             insertbackground="white",
             relief="flat"
         )
-        self.num_entry.grid(row=0, column=1, sticky="w")
+    
+    def _setup_bindings(self):
+        """Настройка привязок клавиш и меню"""
+        # Контекстное меню
+        self.context_menu = tk.Menu(
+            self.root,
+            tearoff=0,
+            bg="#2a2a40",
+            fg="#f0f0f0"
+        )
+        self.context_menu.add_command(label="Вставить", command=self._paste)
+        self.context_menu.add_command(label="Копировать", command=self._copy)
+        self.context_menu.add_command(label="Вырезать", command=self._cut)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Очистить", command=self._clear)
         
-        # Progress bar
-        self.progress_var = tk.IntVar()
-        self.progressbar = ttk.Progressbar(root, maximum=100, variable=self.progress_var, length=500)
-        self.progressbar.pack(pady=(20, 10))
+        # Привязка к полям
+        for entry in [self.appid_entry, self.num_entry]:
+            entry.bind("<Button-3>", self._show_context_menu)
+            entry.bind('<Control-v>', self._paste_via_ctrl)
+            entry.bind('<Control-V>', self._paste_via_ctrl)
         
-        # Статус
-        self.status_label = ttk.Label(root, text="Готов к запуску", 
-                                     font=("Segoe UI", 10), 
-                                     foreground="#a7a9be", background="#1e1e2f")
-        self.status_label.pack()
-        
-        # Кнопка запуска
-        self.start_button = ttk.Button(root, text="Начать загрузку", command=self.start_download)
-        self.start_button.pack(pady=20, ipadx=10, ipady=5)
-        
-        # 👇 СОЗДАЕМ КОНТЕКСТНОЕ МЕНЮ
-        self.create_context_menu()
-        
-        # 👇 ПРИВЯЗЫВАЕМ КОНТЕКСТНОЕ МЕНЮ К ПОЛЯМ
-        self.appid_entry.bind("<Button-3>", self.show_context_menu)
-        self.num_entry.bind("<Button-3>", self.show_context_menu)
-        
-        # 👇 ПРИВЯЗЫВАЕМ CTRL+V ДЛЯ ПОЛЕЙ
-        self.appid_entry.bind('<Control-v>', self.paste_via_ctrl_v)
-        self.appid_entry.bind('<Control-V>', self.paste_via_ctrl_v)
-        self.num_entry.bind('<Control-v>', self.paste_via_ctrl_v)
-        self.num_entry.bind('<Control-V>', self.paste_via_ctrl_v)
-        
-        # Фокус на поле AppID
         self.appid_entry.focus_set()
     
-    def create_context_menu(self):
-        """Создает контекстное меню для полей ввода"""
-        self.context_menu = tk.Menu(self.root, tearoff=0, bg="#2a2a40", fg="#f0f0f0")
-        self.context_menu.add_command(label="Вставить", command=self.paste_from_clipboard)
-        self.context_menu.add_command(label="Копировать", command=self.copy_from_entry)
-        self.context_menu.add_command(label="Вырезать", command=self.cut_from_entry)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="Очистить", command=self.clear_entry)
-        
-        # Храним ссылку на текущее поле
-        self.current_entry = None
-    
-    def show_context_menu(self, event):
+    def _show_context_menu(self, event):
         """Показывает контекстное меню"""
         self.current_entry = event.widget
         try:
@@ -142,63 +170,63 @@ class SteamReviewsApp:
         finally:
             self.context_menu.grab_release()
     
-    def paste_from_clipboard(self):
-        """Вставляет текст из буфера обмена в текущее поле"""
+    def _paste(self):
+        """Вставка из буфера обмена"""
         if self.current_entry:
             try:
-                clipboard_text = self.root.clipboard_get()
-                self.current_entry.insert(tk.INSERT, clipboard_text)
-                self.auto_parse_appid()
+                text = self.root.clipboard_get()
+                self.current_entry.insert(tk.INSERT, text)
+                self._auto_parse_appid()
             except:
                 pass
     
-    def paste_via_ctrl_v(self, event):
+    def _paste_via_ctrl(self, event):
         """Вставка через Ctrl+V"""
         try:
-            clipboard_text = self.root.clipboard_get()
-            event.widget.insert(tk.INSERT, clipboard_text)
-            self.auto_parse_appid()
+            text = self.root.clipboard_get()
+            event.widget.insert(tk.INSERT, text)
+            self._auto_parse_appid()
             return "break"
         except:
             return "break"
     
-    def copy_from_entry(self):
-        """Копирует выделенный текст из текущего поля"""
+    def _copy(self):
+        """Копирование в буфер обмена"""
         if self.current_entry:
             try:
-                selected = self.current_entry.selection_get()
+                text = self.current_entry.selection_get()
                 self.root.clipboard_clear()
-                self.root.clipboard_append(selected)
+                self.root.clipboard_append(text)
             except:
                 pass
     
-    def cut_from_entry(self):
-        """Вырезает выделенный текст из текущего поля"""
+    def _cut(self):
+        """Вырезание в буфер обмена"""
         if self.current_entry:
             try:
-                selected = self.current_entry.selection_get()
+                text = self.current_entry.selection_get()
                 self.root.clipboard_clear()
-                self.root.clipboard_append(selected)
+                self.root.clipboard_append(text)
                 self.current_entry.delete(tk.SEL_FIRST, tk.SEL_LAST)
             except:
                 pass
     
-    def clear_entry(self):
-        """Очищает текущее поле"""
+    def _clear(self):
+        """Очистка поля"""
         if self.current_entry:
             self.current_entry.delete(0, tk.END)
     
-    def auto_parse_appid(self):
-        """Автоматически извлекает AppID при вставке"""
+    def _auto_parse_appid(self):
+        """Автоматическое извлечение AppID из ссылки"""
         text = self.appid_entry.get().strip()
-        appid = self.extract_appid(text)
+        appid = self._extract_appid(text)
         if appid:
             self.appid_entry.delete(0, tk.END)
             self.appid_entry.insert(0, appid)
-            self.status_label.config(text=f"✅ Найден AppID: {appid}", foreground="#90be6d")
+            self._update_status(f"✅ Найден AppID: {appid}", "#90be6d")
     
-    def extract_appid(self, text):
-        """Извлекает AppID из текста (ссылки или просто числа)"""
+    def _extract_appid(self, text):
+        """Извлекает AppID из текста"""
         if text.isdigit():
             return text
         
@@ -214,101 +242,104 @@ class SteamReviewsApp:
             match = re.search(pattern, text)
             if match:
                 return match.group(1)
-        
         return None
+    
+    def _get_appid(self):
+        """Получает AppID из поля с авто-извлечением"""
+        text = self.appid_entry.get().strip()
+        if not text.isdigit():
+            extracted = self._extract_appid(text)
+            if extracted:
+                self.appid_entry.delete(0, tk.END)
+                self.appid_entry.insert(0, extracted)
+                return extracted
+            return None
+        return text
+    
+    def _update_status(self, text, color="#e0e0e0"):
+        """Обновляет текст статуса"""
+        self.status_label.config(text=text, foreground=color)
     
     def update_progress(self, downloaded, total):
         """Обновляет прогресс-бар"""
         percent = int(downloaded / total * 100)
         self.progress_var.set(percent)
-        self.status_label.config(text=f"Загружено отзывов: {downloaded} из {total}", 
-                                foreground="#e0e0e0")
+        self._update_status(f"Загружено отзывов: {downloaded} из {total}")
     
     def check_reviews_count(self):
-        """Проверяет количество доступных отзывов"""
-        appid = self.appid_entry.get().strip()
-        
-        if not appid.isdigit():
-            extracted = self.extract_appid(appid)
-            if extracted:
-                appid = extracted
-                self.appid_entry.delete(0, tk.END)
-                self.appid_entry.insert(0, appid)
-            else:
-                messagebox.showerror("Ошибка", "Введите корректный числовой AppID или ссылку на игру")
-                return
+        """Проверяет количество доступных отзывов и получает название игры"""
+        appid = self._get_appid()
+        if not appid:
+            messagebox.showerror("Ошибка", "Введите корректный числовой AppID или ссылку на игру")
+            return
         
         self.available_label.config(text="Проверка...", foreground="#f2cc8f")
         self.check_button.config(state="disabled")
         
-        def run_check():
+        def run():
             try:
+                # 👇 Получаем название игры
+                self.game_name = asyncio.run(self.downloader.fetch_game_name(appid))
+                
+                # Получаем количество отзывов
                 count = asyncio.run(self.downloader.fetch_total_reviews(appid))
                 self.available_reviews = count
+                
+                # Обновляем интерфейс
+                name_text = f" ({self.game_name})" if self.game_name else ""
                 self.root.after(0, lambda: self.available_label.config(
-                    text=f"Всего доступно отзывов: {count}", foreground="#90be6d"))
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"✅ Найдено {count} отзывов", foreground="#90be6d"))
+                    text=f"Всего доступно отзывов: {count}{name_text}", foreground="#90be6d"))
+                self._update_status(f"✅ Найдено {count} отзывов" + (f" для {self.game_name}" if self.game_name else ""), "#90be6d")
             except Exception as e:
                 self.root.after(0, lambda: self.available_label.config(
                     text=f"Ошибка проверки: {e}", foreground="#f05454"))
             finally:
                 self.root.after(0, lambda: self.check_button.config(state="normal"))
         
-        threading.Thread(target=run_check, daemon=True).start()
+        threading.Thread(target=run, daemon=True).start()
     
     def start_download(self):
         """Запускает загрузку отзывов"""
-        appid = self.appid_entry.get().strip()
-        num_str = self.num_entry.get().strip()
-        
-        if not appid.isdigit():
-            extracted = self.extract_appid(appid)
-            if extracted:
-                appid = extracted
-                self.appid_entry.delete(0, tk.END)
-                self.appid_entry.insert(0, appid)
-            else:
-                messagebox.showerror("Ошибка", "Введите корректный числовой AppID или ссылку на игру")
-                return
-        
-        if not appid.isdigit():
-            messagebox.showerror("Ошибка", "Введите корректный числовой AppID")
+        appid = self._get_appid()
+        if not appid:
+            messagebox.showerror("Ошибка", "Введите корректный числовой AppID или ссылку на игру")
             return
+        
+        num_str = self.num_entry.get().strip()
         if not num_str.isdigit() or int(num_str) <= 0:
             messagebox.showerror("Ошибка", "Введите положительное число отзывов")
             return
-        if self.available_reviews is not None and int(num_str) > self.available_reviews:
-            if not messagebox.askyesno("Подтверждение", 
-                f"Запрошено {num_str} отзывов, а доступно только {self.available_reviews}. Продолжить?"):
-                return
         
         total = int(num_str)
+        if self.available_reviews is not None and total > self.available_reviews:
+            if not messagebox.askyesno("Подтверждение", 
+                f"Запрошено {total} отзывов, а доступно только {self.available_reviews}. Продолжить?"):
+                return
+        
         self.progress_var.set(0)
-        self.status_label.config(text="Запуск загрузки...", foreground="#f2cc8f")
+        self._update_status("Запуск загрузки...", "#f2cc8f")
         self.start_button.config(state="disabled")
         self.check_button.config(state="disabled")
         
-        def run_download():
+        def run():
             try:
                 reviews = asyncio.run(
                     self.downloader.download_reviews(
-                        appid, total, 
+                        appid, total,
                         progress_callback=self.update_progress
                     )
                 )
-                filename = self.downloader.save_to_excel(reviews, appid)
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"✅ Загрузка завершена! Файл: {filename}", 
-                    foreground="#90be6d"))
+                # 👇 Передаем название игры для имени файла
+                filename = self.downloader.save_to_excel(reviews, appid, self.game_name)
+                self._update_status(f"✅ Загрузка завершена! Файл: {filename}", "#90be6d")
             except Exception as e:
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"❌ Ошибка: {e}", foreground="#f05454"))
+                self._update_status(f"❌ Ошибка: {e}", "#f05454")
             finally:
                 self.root.after(0, lambda: self.start_button.config(state="normal"))
                 self.root.after(0, lambda: self.check_button.config(state="normal"))
         
-        threading.Thread(target=run_download, daemon=True).start()
+        threading.Thread(target=run, daemon=True).start()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
