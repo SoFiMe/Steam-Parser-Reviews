@@ -329,7 +329,6 @@ class SteamReviewsApp:
                         progress_callback=self.update_progress
                     )
                 )
-                # 👇 Передаем название игры для имени файла
                 filename = self.downloader.save_to_excel(reviews, appid, self.game_name)
                 self._update_status(f"✅ Загрузка завершена! Файл: {filename}", "#90be6d")
             except Exception as e:

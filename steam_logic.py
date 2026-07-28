@@ -132,16 +132,52 @@ class SteamReviewsDownloader:
         
         return reviews
     
+    def calculate_hours_stats(self, df):
+        """Рассчитывает статистику по группам часов"""
+        df_copy = df.copy()
+        
+        def get_hours_group(hours):
+            if hours < 5:
+                return '0-5 часов'
+            elif 5 <= hours < 20:
+                return '5-20 часов'
+            else:
+                return '20+ часов'
+        
+        df_copy['Группа часов'] = df_copy['Часов наиграно'].apply(get_hours_group)
+        
+        hours_stats = df_copy.groupby(['Группа часов', 'Тип отзыва']).size().unstack(fill_value=0)
+        
+        hours_stats = hours_stats.rename(columns={
+            'Положительный': 'Положительные',
+            'Отрицательный': 'Отрицательные'
+        })
+        
+        hours_stats['Кол-во отзывов'] = hours_stats['Положительные'] + hours_stats['Отрицательные']
+        total_reviews = hours_stats['Кол-во отзывов'].sum()
+        hours_stats['% от общего числа'] = (hours_stats['Кол-во отзывов'] / total_reviews * 100).round(2)
+        hours_stats['% положительных от группы'] = (hours_stats['Положительные'] / hours_stats['Кол-во отзывов'] * 100).round(2)
+        hours_stats['% отрицательных от группы'] = (hours_stats['Отрицательные'] / hours_stats['Кол-во отзывов'] * 100).round(2)
+        
+        hours_stats = hours_stats.reset_index()
+        hours_stats = hours_stats[['Группа часов', 'Кол-во отзывов', 'Положительные', 'Отрицательные', 
+                                   '% от общего числа', '% положительных от группы', '% отрицательных от группы']]
+        
+        return hours_stats
+    
     def save_to_excel(self, reviews, appid, game_name=None):
-        """Сохраняет отзывы и статистику в Excel"""
+        """Сохраняет отзывы и статистику в Excel (3 листа)"""
         df = pd.DataFrame(reviews)
         
+        # Делаем гиперссылки
         def make_hyperlink(row):
             return f'=HYPERLINK("{row["Ссылка на отзыв"]}", "{row["Автор"]}")'
         df['Ссылка на отзыв'] = df.apply(make_hyperlink, axis=1)
         df.drop(columns=['Автор'], inplace=True)
         
         total_reviews = len(reviews)
+        
+        # ---- ЛИСТ 2: Статистика по языкам ----
         lang_stats = df.groupby('Язык').agg(
             кол_во_отзывов=('Язык', 'size'),
             положительных=('Тип отзыва', lambda x: (x == 'Положительный').sum()),
@@ -155,6 +191,9 @@ class SteamReviewsDownloader:
         lang_stats.columns = ['Язык', 'Кол-во отзывов', 'Положительные', 'Отрицательные', 
                               '% от общего числа', '% положительных от языка', '% отрицательных от языка']
         
+        # ---- ЛИСТ 3: Статистика по часам ----
+        hours_stats = self.calculate_hours_stats(df)
+        
         # Формируем имя файла
         if game_name:
             invalid_chars = r'<>:"/\|?*'
@@ -166,10 +205,13 @@ class SteamReviewsDownloader:
         else:
             filename = f"{appid}_reviews.xlsx"
         
+        # Сохраняем с 3 листами
         with pd.ExcelWriter(filename, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Отзывы', index=False)
             lang_stats.to_excel(writer, sheet_name='Статистика по языкам', index=False)
+            hours_stats.to_excel(writer, sheet_name='Статистика по часам', index=False)
         
+        # Авто-подгонка ширины колонок
         try:
             from openpyxl import load_workbook
             wb = load_workbook(filename)
